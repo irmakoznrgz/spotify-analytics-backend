@@ -44,11 +44,13 @@ uvicorn main:app --reload
 ```
 Navigate to `http://127.0.0.1:8000/docs` to see the interactive Swagger UI!
 
-## 📡 API Endpoints
+## API Endpoints
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `GET` | `/` | Root endpoint, checks API health. |
 | `GET` | `/api/stats/artists` | Returns the top 10 most energetic artists. |
 | `GET` | `/api/stats/top-songs-by-genre` | Uses Window Functions to return top 3 songs per genre. |
-| `GET` | `/api/search` | Dynamic search with query parameters (`?genre=pop&artist=adele`). |
+| `GET` | `/api/search` | Dynamic search with 10+ query parameters (genre, energy, danceability, etc.) and pagination support (`limit`, `offset`). |
+| `GET` | `/api/search/count` | Returns the total count of tracks matching the active dynamic filters. |
+| `GET` | `/api/tracks/{track_id}` | Retrieves all 20 detailed features for a specific single track. |
