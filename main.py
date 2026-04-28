@@ -1,27 +1,28 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from database import get_db_connection 
+import asyncpg
 
 app = FastAPI(title="Spotify Statistics API")
 
-def get_db():
-    conn = get_db_connection()
+async def get_db():
+    conn = await get_db_connection()
     try:
         yield conn 
     finally:
-        conn.close() 
+        await conn.close() 
 
 @app.get("/api/stats/artists")
-def get_top_energetic_artists(conn = Depends(get_db)):
-    cursor = conn.cursor()
+async def get_top_energetic_artists(conn = Depends(get_db)):
 
-    sql_query = """ 
-        SELECT artists, AVG(energy) AS average_energy From spotify_tracks_dataset GROUP BY artists ORDER BY average_energy DESC LIMIT 10;
-    """
+    try:
+        sql_query = """ 
+            SELECT artists, AVG(energy) AS average_energy From spotify_tracks_dataset GROUP BY artists ORDER BY average_energy DESC LIMIT 10;
+        """
 
-    cursor.execute(sql_query)
+        coming_data = await conn.fetch(sql_query)
 
-    coming_data = cursor.fetchall()
-    cursor.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database connection error")
 
     results = []
     for row in coming_data:
@@ -32,31 +33,31 @@ def get_top_energetic_artists(conn = Depends(get_db)):
     return results
 
 @app.get("/api/stats/top-songs-by-genre")
-def get_top_songs_by_genre(conn = Depends(get_db)):
-    cursor = conn.cursor()
+async def get_top_songs_by_genre(conn = Depends(get_db)):
 
-    sql_query = """ 
-        WITH RankedData AS (
+    try:
+        sql_query = """ 
+            WITH RankedData AS (
+                SELECT 
+                    track_name, 
+                    artists, 
+                    track_genre, 
+                    popularity,
+                    ROW_NUMBER() OVER (PARTITION BY track_genre ORDER BY popularity DESC) AS most_popular 
+                FROM spotify_tracks_dataset
+            )
             SELECT 
                 track_name, 
                 artists, 
                 track_genre, 
-                popularity,
-                ROW_NUMBER() OVER (PARTITION BY track_genre ORDER BY popularity DESC) AS most_popular 
-            FROM spotify_tracks_dataset
-        )
-        SELECT 
-            track_name, 
-            artists, 
-            track_genre, 
-            popularity
-        FROM RankedData
-        WHERE most_popular IN (1,2,3);
-    """
+                popularity
+            FROM RankedData
+            WHERE most_popular IN (1,2,3);
+        """
 
-    cursor.execute(sql_query)
-    coming_data = cursor.fetchall()
-    cursor.close()
+        coming_data = await conn.fetch(sql_query)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database connection error")
 
     results = []
     for row in coming_data:
@@ -68,9 +69,8 @@ def get_top_songs_by_genre(conn = Depends(get_db)):
         })
     return results
 
-
 @app.get("/api/search")
-def search_songs(genre: str = None, 
+async def search_songs(genre: str = None, 
                 artist: str = None, 
                 track_name: str = None,
                 min_energy: float = None, 
@@ -85,65 +85,78 @@ def search_songs(genre: str = None,
                 offset: int = 0,
                 conn = Depends(get_db)):
     
-    cursor = conn.cursor()
-
-    sql_query = "SELECT track_name, artists, track_genre, popularity, energy, danceability, valence FROM spotify_tracks_dataset WHERE 1=1"
-    
-    values = []
-    
-    if genre:
-        sql_query += " AND track_genre = %s"
-        values.append(genre)
+    try:
+        sql_query = "SELECT track_name, artists, track_genre, popularity, energy, danceability, valence FROM spotify_tracks_dataset WHERE 1=1"
         
-    if artist:
-        sql_query += " AND artists ILIKE %s"
-        search_text = f"%{artist}%"
-        values.append(search_text)
+        values = []
+        
+        if genre:
+            values.append(genre)
+            sql_query += f" AND track_genre = ${len(values)}"
+            
+            
+        if artist:
+            search_text = f"%{artist}%"
+            values.append(search_text)
+            sql_query += f" AND artists ILIKE ${len(values)}"
+           
 
-    if track_name:
-        sql_query += " AND track_name ILIKE %s"
-        search_text = f"%{track_name}%"
-        values.append(search_text)
+        if track_name:
+            search_text = f"%{track_name}%"
+            values.append(search_text)
+            sql_query += f" AND track_name ILIKE ${len(values)}"
+            
 
-    if min_energy is not None:
-        sql_query += " AND energy >= %s"
-        values.append(min_energy)
+        if min_energy is not None:
+            values.append(min_energy)
+            sql_query += f" AND energy >= ${len(values)}"
+            
 
-    if max_energy is not None:
-        sql_query += " AND energy <= %s"
-        values.append(max_energy)
+        if max_energy is not None:
+            values.append(max_energy)
+            sql_query += f" AND energy <= ${len(values)}"
+            
 
-    if min_popularity is not None:
-        sql_query += " AND popularity >= %s"
-        values.append(min_popularity)
+        if min_popularity is not None:
+            values.append(min_popularity)
+            sql_query += f" AND popularity >= ${len(values)}"
+            
 
-    if max_popularity is not None:
-        sql_query += " AND popularity <= %s"
-        values.append(max_popularity)
+        if max_popularity is not None:
+            values.append(max_popularity)
+            sql_query += f" AND popularity <= ${len(values)}"
+            
 
-    if min_danceability is not None:
-        sql_query += " AND danceability >= %s"
-        values.append(min_danceability)
-    
-    if max_danceability is not None:
-        sql_query += " AND danceability <= %s"
-        values.append(max_danceability)
+        if min_danceability is not None:
+            values.append(min_danceability)
+            sql_query += f" AND danceability >= ${len(values)}"
+            
+        
+        if max_danceability is not None:
+            values.append(max_danceability)
+            sql_query += f" AND danceability <= ${len(values)}"
+           
 
-    if min_valence is not None:
-        sql_query += " AND valence >= %s"
-        values.append(min_valence)
+        if min_valence is not None:
+            values.append(min_valence)
+            sql_query += f" AND valence >= ${len(values)}"
+            
 
-    if max_valence is not None:
-        sql_query += " AND valence <= %s"
-        values.append(max_valence)
+        if max_valence is not None:
+            values.append(max_valence)
+            sql_query += f" AND valence <= ${len(values)}"
+            
+        values.append(limit)
+        sql_query += f" ORDER BY popularity DESC LIMIT ${len(values)}"
+        
+        values.append(offset)
+        sql_query += f" OFFSET ${len(values)};"
 
-    sql_query += " ORDER BY popularity DESC LIMIT %s OFFSET %s;"
-    values.append(limit)
-    values.append(offset)
+        coming_data = await conn.fetch(sql_query, *values)
 
-    cursor.execute(sql_query, values)
-    coming_data = cursor.fetchall()
-    cursor.close()
+    except Exception as e:
+        print(f"ERROR FOUND!: {e}") 
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
     
     results = []
     for row in coming_data:
@@ -159,16 +172,16 @@ def search_songs(genre: str = None,
     return results
 
 @app.get("/api/genres")
-def filtre_genres(conn = Depends(get_db)):
+async def filtre_genres(conn = Depends(get_db)):
 
-    cursor = conn.cursor()
-
-    sql_query = """ 
-        SELECT DISTINCT track_genre FROM spotify_tracks_dataset;
-    """
-    cursor.execute(sql_query)
-    coming_data = cursor.fetchall()
-    cursor.close()
+    try:
+        sql_query = """ 
+            SELECT DISTINCT track_genre FROM spotify_tracks_dataset;
+        """
+        coming_data = await conn.fetch(sql_query)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database connection error")
 
     results = []
     for row in coming_data:
@@ -177,7 +190,7 @@ def filtre_genres(conn = Depends(get_db)):
 
 
 @app.get("/api/search/count")
-def search_songs_count(genre: str = None, 
+async def search_songs_count(genre: str = None, 
                 artist: str = None, 
                 track_name: str = None,
                 min_energy: float = None, 
@@ -190,78 +203,86 @@ def search_songs_count(genre: str = None,
                 max_valence: float = None,
                 conn = Depends(get_db)):
     
-    cursor = conn.cursor()
-
-    sql_query = "SELECT COUNT(*) FROM spotify_tracks_dataset WHERE 1=1"
-    values = []
-    
-    if genre:
-        sql_query += " AND track_genre = %s"
-        values.append(genre)
+    try:
+        sql_query = "SELECT COUNT(*) FROM spotify_tracks_dataset WHERE 1=1"
+        values = []
         
-    if artist:
-        sql_query += " AND artists ILIKE %s"
-        search_text = f"%{artist}%"
-        values.append(search_text)
+        if genre:
+            values.append(genre)
+            sql_query += f" AND track_genre = ${len(values)}"
+            
+            
+        if artist:
+            search_text = f"%{artist}%"
+            values.append(search_text)
+            sql_query += f" AND artists ILIKE ${len(values)}"
+            
 
-    if track_name:
-        sql_query += " AND track_name ILIKE %s"
-        search_text = f"%{track_name}%"
-        values.append(search_text)
+        if track_name:
+            search_text = f"%{track_name}%"
+            values.append(search_text)
+            sql_query += f" AND track_name ILIKE ${len(values)}"
+            
 
-    if min_energy is not None:
-        sql_query += " AND energy >= %s"
-        values.append(min_energy)
+        if min_energy is not None:
+            values.append(min_energy)
+            sql_query += f" AND energy >= ${len(values)}"
+            
 
-    if max_energy is not None:
-        sql_query += " AND energy <= %s"
-        values.append(max_energy)
+        if max_energy is not None:
+            values.append(max_energy)
+            sql_query += f" AND energy <= ${len(values)}"
+           
+        if min_popularity is not None:
+            values.append(min_popularity)
+            sql_query += f" AND popularity >= ${len(values)}"
+            
 
-    if min_popularity is not None:
-        sql_query += " AND popularity >= %s"
-        values.append(min_popularity)
+        if max_popularity is not None:
+            values.append(max_popularity)
+            sql_query += f" AND popularity <= ${len(values)}"
+            
 
-    if max_popularity is not None:
-        sql_query += " AND popularity <= %s"
-        values.append(max_popularity)
+        if min_danceability is not None:
+            values.append(min_danceability)
+            sql_query += f" AND danceability >= ${len(values)}"
+            
+        
+        if max_danceability is not None:
+            values.append(max_danceability)
+            sql_query += f" AND danceability <= ${len(values)}"
+            
 
-    if min_danceability is not None:
-        sql_query += " AND danceability >= %s"
-        values.append(min_danceability)
+        if min_valence is not None:
+            values.append(min_valence)
+            sql_query += f" AND valence >= ${len(values)}"
+            
+
+        if max_valence is not None:
+            values.append(max_valence)
+
+            sql_query += f" AND valence <= ${len(values)}"
+            
+        coming_data = await conn.fetchval(sql_query, *values)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database connection error")
     
-    if max_danceability is not None:
-        sql_query += " AND danceability <= %s"
-        values.append(max_danceability)
-
-    if min_valence is not None:
-        sql_query += " AND valence >= %s"
-        values.append(min_valence)
-
-    if max_valence is not None:
-        sql_query += " AND valence <= %s"
-        values.append(max_valence)
-
-    cursor.execute(sql_query, values)
-    coming_data = cursor.fetchone()
-    cursor.close()
-    
-    return {"total_count": coming_data[0]}
+    return {"total_count": coming_data}
 
 @app.get("/api/tracks/{track_id}")
-def get_track_details(track_id: str, conn = Depends(get_db)):
+async def get_track_details(track_id: str, conn = Depends(get_db)):
     
-    cursor = conn.cursor()
+    try:
+        sql_query = "SELECT * FROM spotify_tracks_dataset WHERE track_id = $1" 
 
-    sql_query = "SELECT * FROM spotify_tracks_dataset WHERE track_id = %s" 
+        coming_data = await conn.fetchrow(sql_query, track_id)
 
-    cursor.execute(sql_query, (track_id,))
-    coming_data = cursor.fetchone()
-    cursor.close()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database connection error")
 
     if not coming_data:
-        return {"ERROR": "Song Not Found!"}
-
-    col_name = [desc[0] for desc in cursor.description]
-    song_detail = dict(zip(col_name, coming_data))
+        raise HTTPException(status_code=404, detail="Song Not Found!")
     
-    return song_detail
+    return dict(coming_data)
