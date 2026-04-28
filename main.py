@@ -73,6 +73,8 @@ async def get_top_songs_by_genre(conn = Depends(get_db)):
 async def search_songs(genre: str = None, 
                 artist: str = None, 
                 track_name: str = None,
+                track_id: str = None,
+                album_name: str = None,
                 min_energy: float = None, 
                 max_energy: float = None, 
                 min_danceability: float = None,
@@ -86,7 +88,7 @@ async def search_songs(genre: str = None,
                 conn = Depends(get_db)):
     
     try:
-        sql_query = "SELECT track_name, artists, track_genre, popularity, energy, danceability, valence FROM spotify_tracks_dataset WHERE 1=1"
+        sql_query = "SELECT track_name, artists, track_genre, popularity, energy, danceability, valence, track_id, album_name FROM spotify_tracks_dataset WHERE 1=1"
         
         values = []
         
@@ -105,7 +107,16 @@ async def search_songs(genre: str = None,
             search_text = f"%{track_name}%"
             values.append(search_text)
             sql_query += f" AND track_name ILIKE ${len(values)}"
-            
+
+        if track_id:
+            search_text = f"%{track_id}%"
+            values.append(search_text)
+            sql_query += f" AND track_id ILIKE ${len(values)}"
+
+        if album_name:
+            search_text = f"%{album_name}%"
+            values.append(search_text)
+            sql_query += f" AND album_name ILIKE ${len(values)}"
 
         if min_energy is not None:
             values.append(min_energy)
@@ -167,7 +178,9 @@ async def search_songs(genre: str = None,
             "popularity": row[3],
             "energy": row[4],
             "danceability": row[5],
-            "valence": row[6]
+            "valence": row[6],
+            "track_id": row[7],    
+            "album_name": row[8]
         })
     return results
 
